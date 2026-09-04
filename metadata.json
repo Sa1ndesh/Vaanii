@@ -1,0 +1,6 @@
+{
+  "name": "Vani-Kanoon",
+  "description": "AI-powered multilingual legal assistant for Indian Law featuring voice intelligence, legal document generation, FIR analysis, case summarization, and law learning hub.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

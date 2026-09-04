@@ -1,0 +1,8 @@
+{
+  "appId": "com.vanikanoon.app",
+  "appName": "VaniKanoon",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true
+  }
+}

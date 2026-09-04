@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@android:drawable/ic_menu_today"
+        android:title="Home" />
+    <item
+        android:id="@+id/nav_ask"
+        android:icon="@android:drawable/ic_btn_speak_now"
+        android:title="Ask Vani" />
+    <item
+        android:id="@+id/nav_documents"
+        android:icon="@android:drawable/ic_menu_edit"
+        android:title="Documents" />
+    <item
+        android:id="@+id/nav_profile"
+        android:icon="@android:drawable/ic_menu_myplaces"
+        android:title="Profile" />
+</menu>

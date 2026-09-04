@@ -1,0 +1,8 @@
+<resources>
+    <color name="legal_blue_primary">#0A2A43</color>
+    <color name="legal_blue_dark">#051522</color>
+    <color name="legal_gold_accent">#F5C242</color>
+    <color name="legal_gold_dark">#D4A017</color>
+    <color name="legal_bg_light">#F7F9FA</color>
+    <color name="legal_surface_white">#FFFFFF</color>
+</resources>

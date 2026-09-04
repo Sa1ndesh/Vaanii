@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Scales of justice with sound wave aura -->
+    <!-- Base -->
+    <path
+        android:fillColor="#F5C242"
+        android:pathData="M44,78h20v4h-20z" />
+    <path
+        android:fillColor="#F5C242"
+        android:pathData="M48,74h12v4h-12z" />
+    <!-- Pillar -->
+    <path
+        android:fillColor="#F5C242"
+        android:pathData="M52,32h4v42h-4z" />
+    <!-- Pillar Top / Balance Tip -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <!-- Horizontal Beam -->
+    <path
+        android:fillColor="#F5C242"
+        android:pathData="M30,36h48v3h-48z" />
+    <!-- Left Scale strings & pan -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M32,39 L26,54 M32,39 L38,54" />
+    <path
+        android:fillColor="#F5C242"
+        android:pathData="M24,54 C24,60 40,60 40,54 Z" />
+    <!-- Right Scale strings & pan -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M76,39 L70,54 M76,39 L82,54" />
+    <path
+        android:fillColor="#F5C242"
+        android:pathData="M68,54 C68,60 84,60 84,54 Z" />
+    <!-- Soundwave Arcs (Vani / Voice) -->
+    <path
+        android:strokeColor="#F5C242"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M62,24 C68,26 72,30 72,36" />
+    <path
+        android:strokeColor="#F5C242"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M46,24 C40,26 36,30 36,36" />
+</vector>

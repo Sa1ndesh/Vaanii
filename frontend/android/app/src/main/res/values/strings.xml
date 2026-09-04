@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VaniKanoon</string>
+    <string name="title_activity_main">VaniKanoon</string>
+    <string name="package_name">com.vanikanoon.app</string>
+    <string name="custom_url_scheme">com.vanikanoon.app</string>
+</resources>
