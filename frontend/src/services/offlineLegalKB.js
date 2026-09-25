@@ -77,7 +77,7 @@ Under Section 173 BNSS 2023 (earlier Section 154 CrPC), you can file an FIR at A
 - Especially important for women's safety, accidents
 - Useful when traveling or in emergency
 
-**Example:** If you're robbed in Delhi but are in Mumbai, file Zero FIR in Mumbai. It will be transferred to Delhi police.`
+**Example:** If you're robbed in one city but are in another city, file Zero FIR at your current location. It will be transferred to the correct police station automatically.`
   },
   // Bail Related
   {
