@@ -2,39 +2,41 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Mic, MicOff, Volume2, Square, Loader2, Globe, Sparkles, MessageCircle, Wifi, WifiOff } from 'lucide-react';
 import { getOfflineLegalAnswer } from '../services/offlineLegalKB';
 import geminiDirect from '../services/geminiDirect';
+import { Capacitor } from '@capacitor/core';
+import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 
 const LANG_META = {
   kannada: {
-    label: 'ಕನ್ನಡ', en: 'Kannada', tts: 'kn-IN',
+    label: 'ಕನ್ನಡ', en: 'Kannada', tts: 'kn-IN', stt: 'kn-IN',
     gradient: 'from-orange-500 to-amber-500', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-600',
-    welcome: '🙏 ನಮಸ್ಕಾರ! ನಾನು ವಾಣಿ-ಕಾನೂನ್, ನಿಮ್ಮ ಕಾನೂನು ಸಹಾಯಕ.\n\n✅ ಆಫ್‌ಲೈನ್ ಮೋಡ್ ಲಭ್ಯವಿದೆ\n\nFIR, ಜಾಮೀನು, ಆಸ್ತಿ, ವಿಚ್ಛೇದನ — ಯಾವುದೇ ಕಾನೂನು ಪ್ರಶ್ನೆ ಕೇಳಿ.',
+    welcome: '🙏 ನಮಸ್ಕಾರ! ನಾನು ವಾಣಿ-ಕಾನೂನ್, ನಿಮ್ಮ ಕಾನೂನು ಸಹಾಯಕ.\n\n✅ ಆಫ್‌ಲೈನ್ ಮೋಡ್ ಲಭ್ಯವಿದೆ\n🎤 ಆಫ್‌ಲೈನ್ ಧ್ವನಿ ಇನ್‌ಪುಟ್\n\nFIR, ಜಾಮೀನು, ಆಸ್ತಿ — ಯಾವುದೇ ಪ್ರಶ್ನೆ ಕೇಳಿ.',
     placeholder: 'ನಿಮ್ಮ ಕಾನೂನು ಪ್ರಶ್ನೆ ಇಲ್ಲಿ ಬರೆಯಿರಿ...',
     thinking: 'ಹುಡುಕುತ್ತಿದೆ...',
     listen: 'ಕೇಳಿ', stop: 'ನಿಲ್ಲಿಸಿ',
     prompts: ['FIR ಹೇಗೆ ದಾಖಲಿಸುವುದು?', 'ಜಾಮೀನು ಹೇಗೆ ಪಡೆಯುವುದು?', 'ಗೃಹ ಹಿಂಸೆ ಕಾನೂನು'],
   },
   marathi: {
-    label: 'मराठी', en: 'Marathi', tts: 'mr-IN',
+    label: 'मराठी', en: 'Marathi', tts: 'mr-IN', stt: 'mr-IN',
     gradient: 'from-purple-500 to-violet-500', bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-600',
-    welcome: '🙏 नमस्कार! मी वाणी-कानून, तुमचा कायदेशीर मित्र.\n\n✅ ऑफलाइन मोड उपलब्ध\n\nFIR, जामीन, मालमत्ता, घटस्फोट — कोणताही प्रश्न विचारा.',
+    welcome: '🙏 नमस्कार! मी वाणी-कानून, तुमचा कायदेशीर मित्र.\n\n✅ ऑफलाइन मोड उपलब्ध\n🎤 ऑफलाइन व्हॉइस इनपुट\n\nFIR, जामीन, मालमत्ता — कोणताही प्रश्न विचारा.',
     placeholder: 'तुमचा कायदेशीर प्रश्न लिहा...',
     thinking: 'शोधत आहे...',
     listen: 'ऐका', stop: 'थांबवा',
     prompts: ['FIR कशी दाखल करावी?', 'जामीन कसा मिळवावा?', 'घरगुती हिंसाचार कायदा'],
   },
   hindi: {
-    label: 'हिंदी', en: 'Hindi', tts: 'hi-IN',
+    label: 'हिंदी', en: 'Hindi', tts: 'hi-IN', stt: 'hi-IN',
     gradient: 'from-cyan-500 to-blue-500', bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-600',
-    welcome: '🙏 नमस्ते! मैं वाणी-कानून हूँ, आपका कानूनी सहायक.\n\n✅ ऑफलाइन मोड उपलब्ध\n\nFIR, जमानत, संपत्ति, तलाक — कोई भी सवाल पूछें.',
+    welcome: '🙏 नमस्ते! मैं वाणी-कानून हूँ, आपका कानूनी सहायक.\n\n✅ ऑफलाइन मोड उपलब्ध\n🎤 ऑफलाइन वॉइस इनपुट\n\nFIR, जमानत, संपत्ति — कोई भी सवाल पूछें.',
     placeholder: 'अपना कानूनी सवाल यहाँ लिखें...',
     thinking: 'खोज रहा है...',
     listen: 'सुनें', stop: 'रोकें',
     prompts: ['FIR कैसे दर्ज करें?', 'जमानत कैसे मिलती है?', 'घरेलू हिंसा कानून'],
   },
   english: {
-    label: 'English', en: 'English', tts: 'en-IN',
+    label: 'English', en: 'English', tts: 'en-IN', stt: 'en-IN',
     gradient: 'from-green-500 to-emerald-500', bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-600',
-    welcome: '👋 Welcome! I am Vani-Kanoon, your legal assistant.\n\n✅ Offline mode available\n\nFIR, bail, property, divorce — ask any legal question.',
+    welcome: '👋 Welcome! I am Vani-Kanoon, your legal assistant.\n\n✅ Offline mode available\n🎤 Offline voice input\n\nFIR, bail, property, divorce — ask any legal question.',
     placeholder: 'Type your legal question here...',
     thinking: 'Searching...',
     listen: 'Listen', stop: 'Stop',
@@ -42,42 +44,86 @@ const LANG_META = {
   },
 };
 
-// Speech Recognition hook
-const useSpeechRecognition = (lang) => {
+const isNative = Capacitor.isNativePlatform();
+
+// Native Speech Recognition (works offline on Android)
+const useNativeSpeechRecognition = (lang) => {
   const [transcript, setTranscript] = useState('');
   const [listening, setListening] = useState(false);
-  const recRef = useRef(null);
 
-  const startListening = useCallback(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert('Speech Recognition not supported'); return; }
-    const rec = new SR();
-    rec.lang = LANG_META[lang]?.tts || 'hi-IN';
-    rec.interimResults = true;
-    rec.onresult = (e) => {
-      const current = Array.from(e.results).map(r => r[0].transcript).join('');
-      setTranscript(current);
-    };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    recRef.current = rec;
-    rec.start();
-    setListening(true);
+  useEffect(() => {
+    // Request permission on mount
+    if (isNative) {
+      SpeechRecognition.requestPermissions();
+    }
+  }, []);
+
+  const startListening = useCallback(async () => {
+    if (!isNative) {
+      // Fallback to Web Speech API on browser
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { alert('Speech not supported'); return; }
+      const rec = new SR();
+      rec.lang = LANG_META[lang]?.stt || 'hi-IN';
+      rec.interimResults = false;
+      rec.onresult = (e) => setTranscript(e.results[0][0].transcript);
+      rec.onerror = () => setListening(false);
+      rec.onend = () => setListening(false);
+      rec.start();
+      setListening(true);
+      return;
+    }
+
+    try {
+      const available = await SpeechRecognition.available();
+      if (!available.available) {
+        alert('Speech recognition not available');
+        return;
+      }
+
+      setListening(true);
+      setTranscript('');
+
+      // Start listening with native Android speech recognition
+      // This uses Google's offline speech packs when available
+      const result = await SpeechRecognition.start({
+        language: LANG_META[lang]?.stt || 'hi-IN',
+        maxResults: 1,
+        prompt: 'Speak your legal question...',
+        partialResults: false,
+        popup: false, // Use inline recognition
+      });
+
+      if (result.matches && result.matches.length > 0) {
+        setTranscript(result.matches[0]);
+      }
+    } catch (error) {
+      console.error('Speech recognition error:', error);
+    } finally {
+      setListening(false);
+    }
   }, [lang]);
 
-  const stopListening = useCallback(() => {
-    recRef.current?.stop();
+  const stopListening = useCallback(async () => {
+    if (isNative) {
+      try {
+        await SpeechRecognition.stop();
+      } catch (e) {
+        console.log('Stop error:', e);
+      }
+    }
     setListening(false);
   }, []);
 
   return { transcript, setTranscript, listening, startListening, stopListening };
 };
 
-// Browser TTS
+// Browser TTS (works offline)
 const speakText = (text, langCode) => {
   if (!('speechSynthesis' in window)) return null;
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text.replace(/\*\*/g, '').replace(/[#\-|]/g, ' '));
+  const cleanText = text.replace(/\*\*/g, '').replace(/[#\-|`]/g, ' ').substring(0, 500);
+  const utterance = new SpeechSynthesisUtterance(cleanText);
   utterance.lang = LANG_META[langCode]?.tts || 'en-IN';
   utterance.rate = 0.9;
   return utterance;
@@ -134,7 +180,7 @@ export default function VaniKanoonPage() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const bottomRef = useRef(null);
 
-  const { transcript, setTranscript, listening, startListening, stopListening } = useSpeechRecognition(language);
+  const { transcript, setTranscript, listening, startListening, stopListening } = useNativeSpeechRecognition(language);
 
   useEffect(() => { if (transcript) setInput(transcript); }, [transcript]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -190,7 +236,6 @@ export default function VaniKanoonPage() {
       const offlineResult = getOfflineLegalAnswer(text.trim(), language);
 
       if (offlineResult.source !== 'no_match') {
-        // Good offline answer found
         setMessages(prev => [...prev, {
           _id: `bot_${Date.now()}`,
           role: 'bot',
@@ -244,11 +289,14 @@ export default function VaniKanoonPage() {
             </div>
             <h2 className="text-2xl font-bold text-legal-text-primary">Vani-Kanoon</h2>
             <p className="text-sm text-gray-500 mt-2">Your Legal Assistant</p>
-            <div className="flex items-center justify-center gap-2 mt-2">
-              <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-orange-500'}`}></div>
-              <p className="text-xs text-gray-500">
-                {isOnline ? '✅ Online + Offline mode' : '📴 Offline mode active'}
-              </p>
+            <div className="flex flex-col items-center gap-1 mt-3">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-orange-500'}`}></div>
+                <p className="text-xs text-gray-500">
+                  {isOnline ? 'Online + Offline' : 'Offline mode'}
+                </p>
+              </div>
+              <p className="text-xs text-green-600">🎤 Voice works offline</p>
             </div>
           </div>
 
