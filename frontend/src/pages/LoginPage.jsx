@@ -41,9 +41,10 @@ function LoginPage() {
         throw new Error(data.detail || 'Login failed');
       }
 
-      // Save user data to localStorage
+      // Save user data and token to localStorage
       localStorage.setItem('user', JSON.stringify(data));
-      
+      localStorage.setItem('token', data.access_token);
+
       // Navigate directly to chatbot
       navigate('/dashboard/chatbot'); 
 

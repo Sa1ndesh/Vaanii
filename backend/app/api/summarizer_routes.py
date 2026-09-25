@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from typing import Optional
 import pypdf
 import docx
 import io
@@ -11,6 +12,12 @@ import re
 import time
 
 from app.services.ollama_client import chat_json
+from app.core.security import get_current_user
+
+
+async def get_optional_user(current_user: Optional[dict] = Depends(get_current_user)) -> Optional[dict]:
+    """Optional authentication - returns None if not authenticated instead of raising 401."""
+    return current_user
 
 # --- JSON SCHEMA PROMPT FOR DEEP LEGAL CASE SUMMARIZATION ---
 SUMMARIZER_SYSTEM_PROMPT = """
@@ -152,7 +159,10 @@ def extract_text_from_docx(file_stream: io.BytesIO) -> str:
         raise HTTPException(status_code=400, detail=f"DOCX Error: {e}")
 
 @router.post("/upload-and-summarize")
-async def handle_summarize_upload(file: UploadFile = File(...)):
+async def handle_summarize_upload(
+    file: UploadFile = File(...),
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
     print("[summarizer] request start")
     MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB limit
     try:

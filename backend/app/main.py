@@ -21,15 +21,20 @@ app = FastAPI(title="KanoonAI API")
 # --- CORS Configuration ---
 # Allow both localhost and 127.0.0.1 to avoid "Failed to fetch" from browser when the
 # frontend is served on a different host alias of the same machine.
-origins = [
+# Use ALLOWED_ORIGINS env var for production flexibility (comma-separated list)
+default_origins = [
+    "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5174",
 ]
+origins = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else default_origins
+origins = [o.strip() for o in origins if o.strip()]  # Clean up whitespace
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

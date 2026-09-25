@@ -1,0 +1,85 @@
+# Vani-Kanoon Legal LLM Training Configuration
+# Edit these values before training
+
+# Model Selection
+model:
+  name: "unsloth/Phi-3.5-mini-instruct"  # Best for mobile
+  # Alternatives:
+  # - "unsloth/Llama-3.2-3B-Instruct"
+  # - "unsloth/mistral-7b-instruct-v0.3"
+  max_seq_length: 2048
+  load_in_4bit: true
+
+# LoRA Configuration
+lora:
+  r: 32                    # LoRA rank (16-64)
+  alpha: 32                # Usually same as r
+  dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+# Training Parameters
+training:
+  epochs: 3
+  batch_size: 2
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0002    # 2e-4
+  warmup_steps: 50
+  weight_decay: 0.01
+  lr_scheduler: "linear"
+  optimizer: "adamw_8bit"
+  seed: 42
+
+# Data Configuration
+data:
+  training_file: "../../data/training_data.json"
+  validation_split: 0.05   # 5% for validation
+  max_examples: null       # null = use all, or set number
+
+# Output Configuration
+output:
+  dir: "./output"
+  save_strategy: "epoch"
+  save_total_limit: 2
+
+# GGUF Conversion
+gguf:
+  quantization: "Q4_K_M"   # Options: Q4_K_M, Q5_K_M, Q8_0, F16
+  output_name: "vani-legal"
+
+# System Prompt (embedded in training data)
+system_prompt: |
+  You are Vani, an expert AI legal assistant specializing in Indian law.
+  You provide accurate, helpful information about Indian laws including:
+  - Bharatiya Nyaya Sanhita (BNS) 2023
+  - Bharatiya Nagarik Suraksha Sanhita (BNSS) 2023
+  - Bharatiya Sakshya Adhiniyam (BSA) 2023
+  - Constitution of India
+  - All other Central and State Acts
+
+  Always cite relevant sections and acts. Be concise but thorough.
+  Respond in the same language as the user's question.
+
+# Prompt Templates
+prompts:
+  phi3: |
+    <|system|>
+    {system}<|end|>
+    <|user|>
+    {instruction}{input}<|end|>
+    <|assistant|>
+    {output}<|end|>
+
+  llama: |
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+    {system}<|eot_id|>
+    <|start_header_id|>user<|end_header_id|>
+    {instruction}{input}<|eot_id|>
+    <|start_header_id|>assistant<|end_header_id|>
+    {output}<|eot_id|>

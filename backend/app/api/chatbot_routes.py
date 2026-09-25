@@ -1,7 +1,25 @@
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import re
 from app.services.ollama_client import chat
+from app.core.security import get_current_user, decode_access_token
+
+# Optional auth: returns user payload or None (does not raise)
+security_bearer_optional = HTTPBearer(auto_error=False)
+
+
+def get_current_user_optional(
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer_optional)
+) -> Optional[dict]:
+    """Returns user payload if valid token provided, otherwise None."""
+    if not auth or not auth.credentials:
+        return None
+    payload = decode_access_token(auth.credentials)
+    if not payload or "sub" not in payload:
+        return None
+    return payload
 
 # --- REVISED SYSTEM PROMPT (VERSION 5) ---
 SYSTEM_PROMPT = """
@@ -40,9 +58,13 @@ class ChatQuery(BaseModel):
     query: str
 
 @router.post("/query")
-async def handle_chat_query(chat_query: ChatQuery):
+async def handle_chat_query(
+    chat_query: ChatQuery,
+    current_user: Optional[dict] = Depends(get_current_user_optional)
+):
     """
     Handles a user's legal query by sending it to the Ollama model.
+    Authentication is optional - unauthenticated users can still use basic features.
     """
     try:
         ai_text = await chat(

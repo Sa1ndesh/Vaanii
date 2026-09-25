@@ -16,3 +16,10 @@ mysql-connector-python
 bcrypt
 pydantic[email]
 fastapi-mail
+PyJWT
+pytesseract
+opencv-python
+pillow
+google-generativeai
+gtts
+pyttsx3

@@ -1,9 +1,23 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 
 from app.services.ollama_client import chat_json
+from app.core.security import security_bearer, decode_access_token
+from fastapi.security import HTTPAuthorizationCredentials
+
+
+def get_optional_user(
+    auth: HTTPAuthorizationCredentials | None = Depends(security_bearer)
+) -> dict | None:
+    """Optional auth dependency - returns user payload or None if not authenticated."""
+    if not auth or not auth.credentials:
+        return None
+    payload = decode_access_token(auth.credentials)
+    if not payload or "sub" not in payload:
+        return None
+    return payload
 
 # --- API Router ---
 router = APIRouter(
@@ -49,7 +63,10 @@ class BareActRequest(BaseModel):
     section: str = Field(..., min_length=3, description="The legal section to simplify, e.g., 'IPC 304' or 'Evidence Act Section 113B'")
 
 @router.post("/simplify-bare-act")
-async def handle_simplify_bare_act(request: BareActRequest):
+async def handle_simplify_bare_act(
+    request: BareActRequest,
+    current_user: dict | None = Depends(get_optional_user)
+):
     try:
         user_prompt = f"Please simplify and explain this section: {request.section}"
         json_response = await chat_json(
@@ -123,7 +140,10 @@ class AnswerEvaluationRequest(BaseModel):
     answer: str = Field(..., min_length=20, description="The student's answer to the question")
 
 @router.post("/evaluate-answer")
-async def handle_evaluate_answer(request: AnswerEvaluationRequest):
+async def handle_evaluate_answer(
+    request: AnswerEvaluationRequest,
+    current_user: dict | None = Depends(get_optional_user)
+):
     try:
         user_prompt = f"Question: {request.question}\n\nStudent's Answer: {request.answer}"
         json_response = await chat_json(
@@ -195,7 +215,10 @@ class ResearchRequest(BaseModel):
     topic: str = Field(..., min_length=5, description="The legal topic to research")
 
 @router.post("/research-topic")
-async def handle_research_topic(request: ResearchRequest):
+async def handle_research_topic(
+    request: ResearchRequest,
+    current_user: dict | None = Depends(get_optional_user)
+):
     """
     Accepts a legal topic and returns a comprehensive 8-point
     set of notes, including cases, flowchart, and model answer.

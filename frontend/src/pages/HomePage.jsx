@@ -10,7 +10,8 @@ import {
   BookOpen, 
   ListChecks, 
   Shield,
-  Award
+  Award,
+  Mic
 } from 'lucide-react';
 // Make sure this path is correct for your folder structure
 import logo from '../assets/logo.png'; 
@@ -113,6 +114,12 @@ function HomePage() {
             </div>
             
             <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              <FeatureCard 
+                icon={Mic}
+                title="Vani-Kanoon (Voice)"
+                description="Ask legal questions in Kannada, Hindi, or Marathi by voice. Get dialect-aware answers instantly."
+                path="/dashboard/vani-kanoon"
+              />
               <FeatureCard 
                 icon={MessageCircle}
                 title="Legal Query Chatbot"

@@ -1,3 +1,4 @@
+
 # ⚖️ Vani-Kanoon — AI Legal Assistant
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)

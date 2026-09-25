@@ -16,6 +16,15 @@ from app.core.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 # Persistent async client for fallback usage
 _async_client = httpx.AsyncClient(timeout=10.0)
 
+# Local trained model support
+_local_model_available = False
+try:
+    from app.services.local_llm import chat_local
+    _local_model_available = True
+    print("[AI Client] Local Vani-Kanoon model available")
+except Exception as e:
+    print(f"[AI Client] Local model not available: {e}")
+
 # Google GenAI Client initialization
 _gemini_client = None
 try:
@@ -43,14 +52,16 @@ async def _call_gemini(
         return None
 
     from google.genai import types
-    full_prompt = f"SYSTEM INSTRUCTION:\n{system}\n\nUSER PROMPT:\n{prompt}" if system else prompt
-    
+
     config_kwargs = {
         "temperature": 0.3,
         "max_output_tokens": 8192
     }
     if response_mime_type:
         config_kwargs["response_mime_type"] = response_mime_type
+    # Pass system prompt as a proper system_instruction so Gemini actually honours it
+    if system:
+        config_kwargs["system_instruction"] = system
 
     config = types.GenerateContentConfig(**config_kwargs)
 
@@ -62,11 +73,11 @@ async def _call_gemini(
                     None,
                     lambda m=model_name: _gemini_client.models.generate_content(
                         model=m,
-                        contents=full_prompt,
+                        contents=prompt,
                         config=config
                     )
                 ),
-                timeout=3.5
+                timeout=8.0
             )
             if res and res.text:
                 return res.text.strip()
@@ -88,14 +99,24 @@ async def chat(
     format: str | None = None,
 ) -> str:
     """
-    Send a chat request across multi-model Gemini Flash with Ollama backup.
+    Send a chat request across multi-model Gemini Flash with Local/Ollama backup.
+    Priority: Gemini → Local Vani-Kanoon → Ollama
     """
     # 1. Try Multi-Model Gemini Flash
     gemini_text = await _call_gemini(prompt, system=system)
     if gemini_text:
         return gemini_text
 
-    # 2. Fallback to Local Ollama
+    # 2. Try Local Trained Model (Vani-Kanoon)
+    if _local_model_available:
+        try:
+            local_text = await chat_local(prompt, system=system, temperature=temperature, max_tokens=max_tokens)
+            if local_text:
+                return local_text
+        except Exception as e:
+            print(f"[Local Model] Error: {e}, falling back to Ollama...")
+
+    # 3. Fallback to Local Ollama
     used_model = model or OLLAMA_MODEL
     messages: list[dict] = []
     if system:

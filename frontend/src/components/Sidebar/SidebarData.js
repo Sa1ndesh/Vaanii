@@ -12,6 +12,11 @@ import {
 
 export const sidebarData = [
   {
+    title: "Vani-Kanoon (Voice)",
+    IconComponent: Mic,
+    path: "/dashboard/vani-kanoon"
+  },
+  {
     title: "Legal Query Chatbot",
     IconComponent: MessageCircle,
     path: "/dashboard/chatbot"
@@ -40,11 +45,6 @@ export const sidebarData = [
     title: "FAQ Builder",
     IconComponent: ListChecks,
     path: "/dashboard/faq-builder"
-  },
-  {
-    title: "Vani-Kanoon (Voice)",
-    IconComponent: Mic,
-    path: "/dashboard/vani-kanoon"
   },
   {
     title: "Settings",

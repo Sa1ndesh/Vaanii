@@ -4,9 +4,11 @@ Voice-based multilingual legal assistant with dialect intelligence and RAG.
 Migrated from google-genai SDK to Ollama local LLM.
 """
 
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from app.services.ollama_client import chat
+from app.core.security import security_bearer, decode_access_token
 from app.services.dialect_service import (
     get_states,
     get_districts,
@@ -17,6 +19,16 @@ from app.services.dialect_service import (
 from app.services.legal_kb import search_legal_docs
 
 router = APIRouter(prefix="/api/vani", tags=["VaniKanoon"])
+
+
+def get_optional_user(auth=Depends(security_bearer)) -> Optional[dict]:
+    """Optional authentication - returns user payload if valid token, else None."""
+    if not auth or not auth.credentials:
+        return None
+    payload = decode_access_token(auth.credentials)
+    if not payload or "sub" not in payload:
+        return None
+    return payload
 
 
 def _build_fallback_answer(query: str, relevant_docs: list, language: str = "english") -> str:
@@ -77,7 +89,7 @@ class TTSRequest(BaseModel):
 # ──────────────────────────────────────────────
 
 @router.get("/languages")
-def get_languages():
+def get_languages(current_user: Optional[dict] = Depends(get_optional_user)):
     return {
         "languages": [
             {"code": "kannada", "name": "ಕನ್ನಡ",  "name_en": "Kannada", "tts_lang": "kn-IN"},
@@ -93,7 +105,7 @@ def get_languages():
 # ──────────────────────────────────────────────
 
 @router.get("/states/{language}")
-def get_language_states(language: str):
+def get_language_states(language: str, current_user: Optional[dict] = Depends(get_optional_user)):
     states = get_states(language)
     if not states:
         raise HTTPException(status_code=404, detail=f"Language '{language}' not supported.")
@@ -105,7 +117,7 @@ def get_language_states(language: str):
 # ──────────────────────────────────────────────
 
 @router.get("/districts/{language}")
-def get_language_districts(language: str, state: str = None):
+def get_language_districts(language: str, state: str = None, current_user: Optional[dict] = Depends(get_optional_user)):
     districts = get_districts(language, state)
     if not districts:
         raise HTTPException(status_code=404, detail=f"Language '{language}' not supported.")
@@ -117,7 +129,7 @@ def get_language_districts(language: str, state: str = None):
 # ──────────────────────────────────────────────
 
 @router.post("/ask")
-async def vani_ask(request: VaniAskRequest):
+async def vani_ask(request: VaniAskRequest, current_user: Optional[dict] = Depends(get_optional_user)):
     relevant_docs = []
 
     try:
@@ -135,7 +147,29 @@ async def vani_ask(request: VaniAskRequest):
         )
 
         # Step 3: Call Ollama
-        system_prompt = f"You are a legal assistant who speaks ONLY in {request.language.capitalize()} script. Never use English words. Always follow the script and dialect rules provided."
+        lang_name = request.language.capitalize()
+        lang_script = {
+            "kannada": "ಕನ್ನಡ",
+            "hindi": "हिंदी",
+            "marathi": "मराठी",
+            "english": "English"
+        }.get(request.language.lower(), request.language)
+
+        system_prompt = f"""You are Vani-Kanoon, an expert Indian legal assistant.
+
+CRITICAL LANGUAGE REQUIREMENT:
+- You MUST write your ENTIRE response in {lang_name} ({lang_script}) script.
+- DO NOT use English at all. Not even for legal terms.
+- Translate ALL legal terms into {lang_name}.
+- If you write even ONE English word, you have FAILED.
+
+Example for {lang_name}:
+- "Section 302" → write it in {lang_script} script
+- "Rent Control Act" → translate to {lang_script}
+- "landlord", "tenant" → translate to {lang_script}
+
+Your response must be 100% in {lang_script} script. Zero English."""
+
         answer = await chat(
             user_prompt,
             system=system_prompt,
@@ -168,7 +202,7 @@ async def vani_ask(request: VaniAskRequest):
         print(f"[Vani-Kanoon] ERROR MSG  : {err_str[:500]}\n")
 
         # Graceful fallback
-        fallback = _build_fallback_answer(request.query, relevant_docs)
+        fallback = _build_fallback_answer(request.query, relevant_docs, language=request.language)
         dialect_info = get_dialect_info(request.language, request.district)
         lang_config = LANGUAGE_CONFIG.get(request.language.lower(), {})
         return {
@@ -187,7 +221,7 @@ async def vani_ask(request: VaniAskRequest):
 # ──────────────────────────────────────────────
 
 @router.get("/dialect-info/{language}/{district}")
-def dialect_info_endpoint(language: str, district: str):
+def dialect_info_endpoint(language: str, district: str, current_user: Optional[dict] = Depends(get_optional_user)):
     info = get_dialect_info(language, district)
     return {"language": language, "district": district, **info}
 
@@ -206,7 +240,7 @@ NEURAL_VOICES = {
 GTTS_LANG_MAP = {"kannada": "kn", "marathi": "mr", "hindi": "hi", "english": "en"}
 
 @router.post("/tts")
-async def text_to_speech(request: TTSRequest):
+async def text_to_speech(request: TTSRequest, current_user: Optional[dict] = Depends(get_optional_user)):
     from fastapi.responses import Response
     import io
 
@@ -216,7 +250,14 @@ async def text_to_speech(request: TTSRequest):
     # Priority 1: Edge-TTS Microsoft Neural HD Human Voice
     try:
         import edge_tts
-        communicate = edge_tts.Communicate(request.text, voice)
+        import re
+
+        clean_text = re.sub(r'[*#_`~>\[\]()]', ' ', request.text)
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        if not clean_text:
+            clean_text = request.text
+
+        communicate = edge_tts.Communicate(clean_text, voice)
         buf = io.BytesIO()
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":

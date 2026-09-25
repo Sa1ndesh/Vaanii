@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from typing import Optional
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import pypdf
 import docx
 import io
@@ -8,7 +10,23 @@ from PIL import Image
 
 from app.services.ollama_client import chat_json
 from app.services.image_enhancer import enhance_image_for_ocr
+from app.core.security import decode_access_token
 import os
+
+# Optional auth bearer - does not auto-error when token is missing
+optional_bearer = HTTPBearer(auto_error=False)
+
+
+def get_current_user_optional(
+    auth: HTTPAuthorizationCredentials | None = Depends(optional_bearer)
+) -> Optional[dict]:
+    """Optional auth dependency - returns user payload if valid token provided, None otherwise."""
+    if not auth or not auth.credentials:
+        return None
+    payload = decode_access_token(auth.credentials)
+    if not payload or "sub" not in payload:
+        return None
+    return payload
 
 # --- Tesseract Configuration for Windows ---
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -108,7 +126,10 @@ def extract_text_from_image(contents: bytes) -> str:
             raise HTTPException(status_code=400, detail=f"Could not extract text from image: {e}")
 
 @router.post("/analyze-fir")
-async def handle_fir_analysis(file: UploadFile = File(...)):
+async def handle_fir_analysis(
+    file: UploadFile = File(...),
+    current_user: Optional[dict] = Depends(get_current_user_optional)
+):
     """
     Accepts a PDF, DOCX, Image, or TXT file, validates size (<15MB), extracts text, and returns a
     structured JSON of key FIR details.

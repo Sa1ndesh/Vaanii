@@ -330,18 +330,25 @@ Clear Legal Answer in English:"""
     })
     dialect_info = get_dialect_info(language, district)
 
-    prompt = f"""You are Vani-Kanoon, an expert legal assistant from {district} specializing in Indian Law.
+    prompt = f"""[STRICT LANGUAGE RULE: Your ENTIRE response MUST be in {language.capitalize()} ({lang_config.get('name', language)}) script. ZERO English words allowed.]
 
-RULES:
-- Write ENTIRELY in {language.capitalize()} ({lang_config.get('name', language)}) script.
-- Use {dialect_info['dialect']} dialect style spoken in {district}.
-- Provide a clear, step-by-step legal answer explaining rights and practical steps.
-- Explicitly cite the relevant Indian Law section (e.g. BNS/IPC, BNSS/CrPC, etc.) in {language.capitalize()} script.
-- Make the answer clear, complete, helpful, and easy to understand.
+You are Vani-Kanoon, an expert legal assistant from {district} specializing in Indian Law.
+
+MANDATORY RULES:
+1. Write 100% in {language.capitalize()} ({lang_config.get('name', language)}) script - NOT A SINGLE ENGLISH WORD.
+2. Use {dialect_info['dialect']} dialect style spoken in {district}.
+3. Translate ALL legal terms into {language.capitalize()}:
+   - "Section" → {lang_config.get('name', language)} word
+   - "Act" → {lang_config.get('name', language)} word
+   - "landlord", "tenant", "eviction" → {lang_config.get('name', language)} words
+4. Provide clear, step-by-step legal answer with rights and practical steps.
+5. Cite relevant Indian Law sections but write them in {language.capitalize()} script.
+
+If you use ANY English word, you have FAILED the task.
 
 Question: {query}
 
-Clear Legal Answer in {dialect_info['dialect']} ({language.capitalize()}):"""
+Answer in {dialect_info['dialect']} ({language.capitalize()} script only):"""
 
     return prompt
 

@@ -1,6 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from typing import List, Literal, Union
+from typing import List, Literal, Union, Optional
+from app.core.security import decode_access_token, security_bearer
+from fastapi.security import HTTPAuthorizationCredentials
+
+
+def get_current_user(auth: HTTPAuthorizationCredentials | None = Depends(security_bearer)) -> Optional[dict]:
+    """Optional authentication - returns user payload or None if not authenticated."""
+    if not auth or not auth.credentials:
+        return None
+    payload = decode_access_token(auth.credentials)
+    if not payload or "sub" not in payload:
+        return None
+    return payload
 from docxtpl import DocxTemplate
 import docx2pdf
 import os
@@ -155,7 +167,7 @@ def sanitize_filename(text):
 
 # --- ENDPOINT 1: GENERATE NDA ---
 @router.post("/generate-nda")
-def handle_nda_generation(request: NDARequest):
+def handle_nda_generation(request: NDARequest, current_user: Optional[dict] = Depends(get_current_user)):
     try:
         doc = get_template("nda_template.docx")
         if doc is None:
@@ -173,7 +185,7 @@ def handle_nda_generation(request: NDARequest):
 
 # --- ENDPOINT 2: GENERATE AFFIDAVIT ---
 @router.post("/generate-affidavit")
-def handle_affidavit_generation(request: AffidavitRequest):
+def handle_affidavit_generation(request: AffidavitRequest, current_user: Optional[dict] = Depends(get_current_user)):
     try:
         doc = get_template("affidavit_template.docx")
         if doc is None:
@@ -192,7 +204,7 @@ def handle_affidavit_generation(request: AffidavitRequest):
 
 # --- ENDPOINT 3: GENERATE RENT AGREEMENT ---
 @router.post("/generate-rent-agreement")
-def handle_rent_agreement_generation(request: RentAgreementRequest):
+def handle_rent_agreement_generation(request: RentAgreementRequest, current_user: Optional[dict] = Depends(get_current_user)):
     try:
         doc = get_template("rent_agreement_template.docx")
         if doc is None:
@@ -210,7 +222,7 @@ def handle_rent_agreement_generation(request: RentAgreementRequest):
 
 # --- ENDPOINT 4: GENERATE SALE DEED ---
 @router.post("/generate-sale-deed")
-def handle_sale_deed_generation(request: SaleDeedRequest):
+def handle_sale_deed_generation(request: SaleDeedRequest, current_user: Optional[dict] = Depends(get_current_user)):
     try:
         doc = get_template("sale_deed_template.docx")
         if doc is None:
@@ -230,7 +242,7 @@ def handle_sale_deed_generation(request: SaleDeedRequest):
 
 # --- ENDPOINT 5: GENERATE LEASE DEED (FIXED) ---
 @router.post("/generate-lease-deed")
-def handle_lease_deed_generation(request: LeaseDeedRequest):
+def handle_lease_deed_generation(request: LeaseDeedRequest, current_user: Optional[dict] = Depends(get_current_user)):
     """ Generates a .docx and .pdf for a Lease Deed. """
     try:
         template_name = "lease_deed_template.docx"
