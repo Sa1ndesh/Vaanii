@@ -1,18 +1,34 @@
 package com.vanikanoon.app.ui.screens.vani
 
+import android.app.Activity
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.widget.Toast
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.core.content.ContextCompat
+import com.vanikanoon.app.util.OfflineSpeechHelper
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import com.vanikanoon.app.voice.VoiceInputManager
+import com.vanikanoon.app.voice.VoiceInputState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,11 +40,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,25 +59,38 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,6 +99,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,6 +132,7 @@ import com.vanikanoon.app.ui.theme.LegalSurfaceWhite
 import com.vanikanoon.app.ui.theme.LegalTextMuted
 import com.vanikanoon.app.ui.theme.LegalTextPrimary
 import com.vanikanoon.app.ui.theme.LegalTextSecondary
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -115,7 +148,8 @@ private enum class VaniStep {
 fun VaniVoiceScreen(
     repository: LegalRepository,
     userManager: UserManager? = null,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToOfflineStatus: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -124,117 +158,59 @@ fun VaniVoiceScreen(
     val currentUser by userManager?.currentUser?.collectAsState() ?: remember { mutableStateOf(null) }
     val userId = currentUser?.email?.ifBlank { "guest" } ?: "guest"
 
-    var currentStep by remember { mutableStateOf(VaniStep.LANGUAGE_SELECTION) }
-    var selectedLanguage by remember { mutableStateOf(LanguageCatalog.languages[0]) }
-    var selectedState by remember { mutableStateOf("") }
-    var selectedDistrict by remember { mutableStateOf("") }
+    var currentStep by rememberSaveable { mutableStateOf(VaniStep.LANGUAGE_SELECTION) }
+    var selectedLanguageCode by rememberSaveable { mutableStateOf(LanguageCatalog.languages[0].code) }
+    var selectedState by rememberSaveable { mutableStateOf("") }
+    var selectedDistrict by rememberSaveable { mutableStateOf("") }
+    var inputText by rememberSaveable { mutableStateOf("") }
 
-    var inputText by remember { mutableStateOf("") }
+    val selectedLanguage = remember(selectedLanguageCode) {
+        LanguageCatalog.languages.find { it.code.equals(selectedLanguageCode, ignoreCase = true) }
+            ?: LanguageCatalog.languages[0]
+    }
+
+    // Intercept back navigation so back press steps backwards smoothly without popping the entire screen
+    BackHandler(enabled = currentStep != VaniStep.LANGUAGE_SELECTION) {
+        when (currentStep) {
+            VaniStep.VOICE_CHAT -> currentStep = VaniStep.DISTRICT_SELECTION
+            VaniStep.DISTRICT_SELECTION -> currentStep = VaniStep.STATE_SELECTION
+            VaniStep.STATE_SELECTION -> currentStep = VaniStep.LANGUAGE_SELECTION
+            else -> onBack()
+        }
+    }
+
     var isThinking by remember { mutableStateOf(false) }
-    var isListening by remember { mutableStateOf(false) }
+    val voiceInputManager = remember { VoiceInputManager.getInstance(context) }
+    val voiceInputState by voiceInputManager.state.collectAsState()
+    val isListening = voiceInputState is VoiceInputState.Listening
+    val isProcessing = voiceInputState is VoiceInputState.Processing
 
-    val channelId = "VANI_VOICE_${selectedLanguage.code.uppercase()}"
+    var activeMessageId by remember { mutableStateOf<String?>(null) }
+    var isSpeaking by remember { mutableStateOf(false) }
+    var isPaused by remember { mutableStateOf(false) }
+    var currentChunkIndex by remember { mutableStateOf(0) }
+    var speechChunks by remember { mutableStateOf<List<String>>(emptyList()) }
+    var currentLangTag by remember { mutableStateOf("en-IN") }
+    var activeGenerationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    val cleanLang = selectedLanguage.code.uppercase()
+    val cleanState = selectedState.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
+    val cleanDistrict = selectedDistrict.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
+    val channelId = "VANI_VOICE_${cleanLang}_${cleanState}_${cleanDistrict}"
     val chatMessages by repository.getChatMessages(channelId, userId).collectAsState(initial = emptyList())
 
     // Android TTS Engine
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
-    DisposableEffect(Unit) {
-        val tts = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                // Initialize default
-            }
-        }
-        ttsEngine = tts
-        onDispose {
-            tts.stop()
-            tts.shutdown()
-        }
-    }
 
-    fun speakText(text: String, langTag: String) {
-        ttsEngine?.let { tts ->
-            val locale = Locale.forLanguageTag(langTag)
-            tts.language = locale
-            val cleanSpeech = com.vanikanoon.app.util.SpeechSanitizer.sanitizeForSpeech(text)
-            tts.speak(cleanSpeech, TextToSpeech.QUEUE_FLUSH, null, "VANI_TTS")
-        }
-    }
-
-    // Android Speech Recognizer
-    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
-    DisposableEffect(Unit) {
-        if (SpeechRecognizer.isRecognitionAvailable(context)) {
-            val sr = SpeechRecognizer.createSpeechRecognizer(context)
-            speechRecognizer = sr
-        }
-        onDispose {
-            speechRecognizer?.destroy()
-        }
-    }
-
-    fun startSpeechRecognition() {
-        val sr = speechRecognizer ?: run {
-            Toast.makeText(context, "Speech Recognition initializing or not supported on this device", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage.ttsLocaleTag)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage.ttsLocaleTag)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your legal question in ${selectedLanguage.nameEn}...")
-        }
-        sr.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { isListening = true }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { isListening = false }
-            override fun onError(error: Int) {
-                isListening = false
-                val errorMsg = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Please try speaking clearly."
-                    SpeechRecognizer.ERROR_NETWORK -> "Network error with speech recognizer. You can also type below."
-                    SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-                    SpeechRecognizer.ERROR_CLIENT -> "Speech recognition client error"
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Audio permission required"
-                    else -> "Speech recognition error ($error)"
-                }
-                Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-            }
-            override fun onResults(results: Bundle?) {
-                isListening = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val recognized = matches[0]
-                    inputText = recognized
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    inputText = matches[0]
-                }
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
+    fun stopSpeaking() {
         try {
-            sr.startListening(intent)
-            isListening = true
-        } catch (e: Exception) {
-            isListening = false
-            Toast.makeText(context, "Could not start mic: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            startSpeechRecognition()
-        } else {
-            Toast.makeText(context, "Microphone permission required for voice input", Toast.LENGTH_SHORT).show()
-        }
+            ttsEngine?.stop()
+        } catch (_: Exception) {}
+        isSpeaking = false
+        isPaused = false
+        activeMessageId = null
+        currentChunkIndex = 0
+        speechChunks = emptyList()
     }
 
     fun handleSend(queryText: String) {
@@ -242,13 +218,16 @@ fun VaniVoiceScreen(
         val textToSend = queryText.trim()
         inputText = ""
 
-        scope.launch {
+        stopSpeaking()
+        val job = scope.launch {
+            android.util.Log.i("CHAT DEBUG", "User message added:\n$textToSend")
             val userMsg = ChatMessage(
                 role = MessageRole.USER,
                 text = textToSend,
                 userId = userId
             )
             repository.saveChatMessage(userMsg, channelId, userId)
+            android.util.Log.i("CHAT DEBUG", "Messages count: ${chatMessages.size}")
             isThinking = true
 
             val botResponse = repository.askVaniVoice(
@@ -257,14 +236,254 @@ fun VaniVoiceScreen(
                 district = selectedDistrict,
                 query = textToSend
             )
+            android.util.Log.i("CHAT DEBUG", "Assistant message added:\n${botResponse.text}")
             repository.saveChatMessage(botResponse.copy(userId = userId), channelId, userId)
             isThinking = false
-
-            // Auto-speak response if available
-            speakText(botResponse.text, selectedLanguage.ttsLocaleTag)
+            android.util.Log.i("CHAT DEBUG", "Final messages count: ${chatMessages.size}")
 
             // Scroll down
             listState.animateScrollToItem((chatMessages.size + 1).coerceAtLeast(0))
+        }
+        activeGenerationJob = job
+    }
+
+    LaunchedEffect(voiceInputState) {
+        when (val s = voiceInputState) {
+            is VoiceInputState.Success -> {
+                android.util.Log.i("VOICE DEBUG", "STT result:\n${s.recognizedText}")
+                android.util.Log.i("VOICE DEBUG", "Adding voice user message")
+                inputText = s.recognizedText
+                voiceInputManager.resetToIdle()
+                if (s.recognizedText.isNotBlank() && !isThinking) {
+                    android.util.Log.i("VOICE DEBUG", "Voice legal processing started")
+                    handleSend(s.recognizedText)
+                    android.util.Log.i("VOICE DEBUG", "Voice assistant answer received")
+                }
+            }
+            is VoiceInputState.Error -> {
+                Toast.makeText(context, s.message, Toast.LENGTH_LONG).show()
+                voiceInputManager.resetToIdle()
+            }
+            else -> {}
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            voiceInputManager.cancel()
+        }
+    }
+
+    fun stopAllOutput() {
+        activeGenerationJob?.cancel()
+        activeGenerationJob = null
+        isThinking = false
+        stopSpeaking()
+    }
+
+    fun muteSpeaking() {
+        try {
+            ttsEngine?.stop()
+        } catch (_: Exception) {}
+        isSpeaking = false
+        isPaused = true
+    }
+
+    fun speakCurrentChunk() {
+        val tts = ttsEngine ?: return
+        if (currentChunkIndex >= speechChunks.size) {
+            isSpeaking = false
+            isPaused = false
+            currentChunkIndex = 0
+            activeMessageId = null
+            return
+        }
+
+        val chunkText = speechChunks[currentChunkIndex]
+        val uId = "CHUNK_${activeMessageId}_$currentChunkIndex"
+        val params = Bundle().apply {
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, uId)
+        }
+        isSpeaking = true
+        isPaused = false
+        tts.speak(chunkText, TextToSpeech.QUEUE_FLUSH, params, uId)
+    }
+
+    fun resumeSpeaking() {
+        val tts = ttsEngine ?: return
+        if (activeMessageId == null || speechChunks.isEmpty()) return
+        OfflineSpeechHelper.configureTtsLocale(tts, currentLangTag)
+        isSpeaking = true
+        isPaused = false
+        speakCurrentChunk()
+    }
+
+    fun startSpeakingMessage(messageId: String, text: String, langTag: String) {
+        val tts = ttsEngine ?: return
+        try {
+            tts.stop()
+        } catch (_: Exception) {}
+
+        val chunks = com.vanikanoon.app.util.SpeechSanitizer.splitIntoSpeechChunks(text)
+        if (chunks.isEmpty()) return
+
+        OfflineSpeechHelper.configureTtsLocale(tts, langTag)
+
+        activeMessageId = messageId
+        speechChunks = chunks
+        currentChunkIndex = 0
+        currentLangTag = langTag
+        isSpeaking = true
+        isPaused = false
+
+        speakCurrentChunk()
+    }
+
+    fun toggleSpeaker(messageId: String, text: String, langTag: String) {
+        if (activeMessageId == messageId) {
+            if (isSpeaking) {
+                muteSpeaking()
+                Toast.makeText(context, "Muted. Tap speaker to resume from where you stopped.", Toast.LENGTH_SHORT).show()
+            } else if (isPaused) {
+                resumeSpeaking()
+                Toast.makeText(context, "Resuming answer...", Toast.LENGTH_SHORT).show()
+            } else {
+                startSpeakingMessage(messageId, text, langTag)
+            }
+        } else {
+            startSpeakingMessage(messageId, text, langTag)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                // Initialize default
+            }
+        }
+        tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                Handler(Looper.getMainLooper()).post {
+                    isSpeaking = true
+                }
+            }
+            override fun onDone(utteranceId: String?) {
+                Handler(Looper.getMainLooper()).post {
+                    if (utteranceId != null && utteranceId.startsWith("CHUNK_")) {
+                        val parts = utteranceId.split("_")
+                        if (parts.size >= 3) {
+                            val msgId = parts[1]
+                            val idx = parts[2].toIntOrNull() ?: -1
+                            if (msgId == activeMessageId && isSpeaking && !isPaused) {
+                                val nextIdx = idx + 1
+                                if (nextIdx < speechChunks.size) {
+                                    currentChunkIndex = nextIdx
+                                    speakCurrentChunk()
+                                } else {
+                                    isSpeaking = false
+                                    isPaused = false
+                                    currentChunkIndex = 0
+                                    activeMessageId = null
+                                }
+                            }
+                        }
+                    } else {
+                        isSpeaking = false
+                        isPaused = false
+                    }
+                }
+            }
+            override fun onError(utteranceId: String?) {
+                Handler(Looper.getMainLooper()).post {
+                    isSpeaking = false
+                    isPaused = false
+                }
+            }
+        })
+        ttsEngine = tts
+        onDispose {
+            try {
+                tts.stop()
+                tts.shutdown()
+            } catch (_: Exception) {}
+        }
+    }
+
+    var showOfflineVoiceGuideDialog by remember { mutableStateOf(false) }
+
+    fun openVoiceSettings() {
+        OfflineSpeechHelper.openVoiceSettings(context)
+    }
+
+    // ===============================
+    // MICROPHONE PERMISSION & ON-DEVICE VOICE
+    // ===============================
+
+    val speechRecognizerLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data = result.data
+                val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                val spokenText = results?.getOrNull(0) ?: ""
+                android.util.Log.i("VOICE DEBUG", "Native SpeechRecognizer result: '$spokenText'")
+                if (spokenText.isNotBlank()) {
+                    inputText = spokenText
+                    handleSend(spokenText)
+                } else {
+                    Toast.makeText(context, "No speech detected. Please try again.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+    fun launchSpeechRecognizer() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage.speechLocaleTag)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your legal question in ${selectedLanguage.nameNative}...")
+            }
+            speechRecognizerLauncher.launch(intent)
+        } catch (e: Exception) {
+            android.util.Log.w("VOICE DEBUG", "RecognizerIntent failed, falling back to VoiceInputManager: ${e.message}")
+            voiceInputManager.startListening(
+                languageNameOrCode = selectedLanguage.code,
+                onTranscriptionReady = { recognized ->
+                    inputText = recognized
+                }
+            )
+        }
+    }
+
+    val permissionLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                launchSpeechRecognizer()
+            } else {
+                Toast.makeText(
+                    context,
+                    "Microphone permission is required for voice input.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
+    fun requestAndStartListening() {
+        val permission =
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            )
+
+        if (permission == PackageManager.PERMISSION_GRANTED) {
+            launchSpeechRecognizer()
+        } else {
+            permissionLauncher.launch(
+                Manifest.permission.RECORD_AUDIO
+            )
         }
     }
 
@@ -283,7 +502,34 @@ fun VaniVoiceScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     item {
-                        Spacer(modifier = Modifier.height(20.dp))
+                        // Back to Home Navigation Button
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = onBack,
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = LegalDeepBlue.copy(alpha = 0.08f),
+                                    contentColor = LegalDeepBlue
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("vani_back_to_home_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Back to Home", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
                         Box(
                             modifier = Modifier
                                 .size(64.dp)
@@ -319,7 +565,44 @@ fun VaniVoiceScreen(
                             ),
                             modifier = Modifier.padding(top = 2.dp)
                         )
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = LegalGoldContainer.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, LegalGoldDark.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Mic,
+                                        contentDescription = null,
+                                        tint = LegalGoldDark,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = "Voice Assistant & Speech Playback Ready",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = LegalDeepBlue
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Speak and listen in your regional language. Powered directly by your device's built-in speech engine with zero language pack downloads required.",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = LegalTextSecondary,
+                                        lineHeight = 18.sp
+                                    )
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
                         Text(
                             text = "Step 1: Select Your Language",
                             style = MaterialTheme.typography.titleMedium.copy(
@@ -334,7 +617,7 @@ fun VaniVoiceScreen(
                     items(LanguageCatalog.languages) { lang ->
                         Card(
                             onClick = {
-                                selectedLanguage = lang
+                                selectedLanguageCode = lang.code
                                 selectedState = ""
                                 selectedDistrict = ""
                                 currentStep = VaniStep.STATE_SELECTION
@@ -417,9 +700,17 @@ fun VaniVoiceScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        IconButton(onClick = { currentStep = VaniStep.LANGUAGE_SELECTION }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        IconButton(
+                            onClick = { currentStep = VaniStep.LANGUAGE_SELECTION },
+                            modifier = Modifier.testTag("state_back_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Languages",
+                                tint = LegalDeepBlue
+                            )
                         }
+                        Spacer(modifier = Modifier.width(4.dp))
                         Column {
                             Text(
                                 text = "Step 2: Select State",
@@ -520,11 +811,17 @@ fun VaniVoiceScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        IconButton(onClick = {
-                            currentStep = VaniStep.STATE_SELECTION
-                        }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        IconButton(
+                            onClick = { currentStep = VaniStep.STATE_SELECTION },
+                            modifier = Modifier.testTag("district_back_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to States",
+                                tint = LegalDeepBlue
+                            )
                         }
+                        Spacer(modifier = Modifier.width(4.dp))
                         Column {
                             Text(
                                 text = "Step 3: Select District in $selectedState",
@@ -564,16 +861,22 @@ fun VaniVoiceScreen(
                                 onClick = {
                                     selectedDistrict = dist
                                     currentStep = VaniStep.VOICE_CHAT
-                                    // Add initial greeting message in strictly selected language if empty
+                                    // Add initial greeting message in strictly selected language and state if empty
                                     scope.launch {
-                                        if (chatMessages.isEmpty()) {
+                                        val destCleanLang = selectedLanguage.code.uppercase()
+                                        val destCleanState = selectedState.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
+                                        val destCleanDist = dist.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
+                                        val targetChannelId = "VANI_VOICE_${destCleanLang}_${destCleanState}_${destCleanDist}"
+
+                                        val existing = repository.getChatMessages(targetChannelId, userId).firstOrNull() ?: emptyList()
+                                        if (existing.isEmpty()) {
                                             val welcome = ChatMessage(
                                                 role = MessageRole.ASSISTANT,
                                                 text = "${info.greetingPhrase}!\n\n" + selectedLanguage.welcomeText,
                                                 dialect = "${info.dialectName} • $dist ($selectedState)",
                                                 userId = userId
                                             )
-                                            repository.saveChatMessage(welcome, channelId, userId)
+                                            repository.saveChatMessage(welcome, targetChannelId, userId)
                                         }
                                     }
                                 },
@@ -637,121 +940,136 @@ fun VaniVoiceScreen(
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            // Back to District/Steps Button
+                            IconButton(
+                                onClick = { currentStep = VaniStep.DISTRICT_SELECTION },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("voice_chat_back_btn")
                             ) {
-                                // Language Chip
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = LegalGoldPrimary,
-                                    modifier = Modifier.clickable { currentStep = VaniStep.LANGUAGE_SELECTION }
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = selectedLanguage.nameNative,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = LegalDeepBlue
-                                            )
-                                        )
-                                    }
-                                }
-
-                                // State Chip
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = LegalBlueLight,
-                                    modifier = Modifier.clickable { currentStep = VaniStep.STATE_SELECTION }
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = selectedState,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = LegalSurfaceWhite,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        )
-                                    }
-                                }
-
-                                // District Chip
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = LegalBlueLight,
-                                    modifier = Modifier.clickable { currentStep = VaniStep.DISTRICT_SELECTION }
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = selectedDistrict,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = LegalGoldPrimary,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        )
-                                    }
-                                }
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to District",
+                                    tint = LegalGoldPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            // Language Chip
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = LegalGoldPrimary,
+                                modifier = Modifier.clickable { currentStep = VaniStep.LANGUAGE_SELECTION }
                             ) {
-                                if (chatMessages.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = {
-                                            scope.launch {
-                                                repository.clearChatMessages(channelId, userId)
-                                                // Re-add initial greeting
-                                                val welcome = ChatMessage(
-                                                    role = MessageRole.ASSISTANT,
-                                                    text = "${dialectInfo.greetingPhrase}!\n\n" + selectedLanguage.welcomeText,
-                                                    dialect = "${dialectInfo.dialectName} • $selectedDistrict ($selectedState)",
-                                                    userId = userId
-                                                )
-                                                repository.saveChatMessage(welcome, channelId, userId)
-                                            }
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Clear Chat",
-                                            tint = LegalGoldPrimary.copy(alpha = 0.85f),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = selectedLanguage.nameNative,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = LegalDeepBlue
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
 
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = LegalGoldPrimary.copy(alpha = 0.15f),
-                                    modifier = Modifier.clickable {
-                                        selectedState = ""
-                                        selectedDistrict = ""
-                                        currentStep = VaniStep.LANGUAGE_SELECTION
-                                    }
+                            // State Chip
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = LegalBlueLight,
+                                modifier = Modifier.clickable { currentStep = VaniStep.STATE_SELECTION }
+                            ) {
+                                Text(
+                                    text = selectedState,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = LegalSurfaceWhite,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+
+                            // District Chip
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = LegalBlueLight,
+                                modifier = Modifier.clickable { currentStep = VaniStep.DISTRICT_SELECTION }
+                            ) {
+                                Text(
+                                    text = selectedDistrict,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = LegalGoldPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+
+                            // Change Region Button (Single crisp line, never wraps vertically)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = LegalGoldPrimary.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, LegalGoldPrimary.copy(alpha = 0.3f)),
+                                modifier = Modifier.clickable {
+                                    selectedState = ""
+                                    selectedDistrict = ""
+                                    currentStep = VaniStep.LANGUAGE_SELECTION
+                                }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                 ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = LegalGoldPrimary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = "Change Region",
+                                        maxLines = 1,
+                                        softWrap = false,
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             color = LegalGoldPrimary,
                                             fontWeight = FontWeight.Bold
-                                        ),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    )
+                                }
+                            }
+
+                            if (chatMessages.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            repository.clearChatMessages(channelId, userId)
+                                            val welcome = ChatMessage(
+                                                role = MessageRole.ASSISTANT,
+                                                text = "${dialectInfo.greetingPhrase}!\n\n" + selectedLanguage.welcomeText,
+                                                dialect = "${dialectInfo.dialectName} • $selectedDistrict ($selectedState)",
+                                                userId = userId
+                                            )
+                                            repository.saveChatMessage(welcome, channelId, userId)
+                                        }
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Clear Chat",
+                                        tint = LegalGoldPrimary.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
@@ -784,6 +1102,7 @@ fun VaniVoiceScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(chatMessages) { message ->
+                        android.util.Log.i("LEGAL DEBUG 7", "displayed message =\n${message.text}")
                         val isUser = message.role == MessageRole.USER
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -803,10 +1122,11 @@ fun VaniVoiceScreen(
                                 modifier = Modifier
                                     .widthIn(max = 320.dp)
                                     .border(
-                                        1.dp,
-                                        if (isUser) LegalDeepBlue else LegalBorder,
+                                        if (!isUser && activeMessageId == message.id && isSpeaking) 2.dp else 1.dp,
+                                        if (isUser) LegalDeepBlue else if (activeMessageId == message.id && isSpeaking) Color(0xFFDC2626) else if (activeMessageId == message.id && isPaused) LegalGoldDark else LegalBorder,
                                         RoundedCornerShape(16.dp)
                                     )
+                                    .testTag(if (isUser) "user_msg_${message.id}" else "bot_msg_${message.id}")
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     if (!isUser && message.dialect != null) {
@@ -857,24 +1177,115 @@ fun VaniVoiceScreen(
                                     }
 
                                     if (!isUser) {
+                                        val isThisActive = activeMessageId == message.id
+                                        val isThisSpeaking = isThisActive && isSpeaking
+                                        val isThisPaused = isThisActive && isPaused
+
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(top = 8.dp),
-                                            horizontalArrangement = Arrangement.End
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            IconButton(
-                                                onClick = {
-                                                    speakText(message.text, selectedLanguage.ttsLocaleTag)
-                                                },
-                                                modifier = Modifier.size(28.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.VolumeUp,
-                                                    contentDescription = "Speak Response",
-                                                    tint = LegalBlueHighlight,
-                                                    modifier = Modifier.size(18.dp)
+                                            if (isThisSpeaking) {
+                                                Text(
+                                                    text = "🔊 Speaking (${currentChunkIndex + 1}/${speechChunks.size.coerceAtLeast(1)})",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        color = Color(0xFFDC2626),
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
                                                 )
+                                            } else if (isThisPaused) {
+                                                Text(
+                                                    text = "⏸️ Muted at part ${currentChunkIndex + 1}/${speechChunks.size.coerceAtLeast(1)}",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        color = LegalGoldDark,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                )
+                                            } else {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (isThisSpeaking) {
+                                                    // MUTE BUTTON: Pauses & remembers position
+                                                    Button(
+                                                        onClick = {
+                                                            toggleSpeaker(message.id, message.text, selectedLanguage.ttsLocaleTag)
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                                        shape = RoundedCornerShape(16.dp),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                                        modifier = Modifier
+                                                            .height(30.dp)
+                                                            .testTag("speaker_mute_button_${message.id}")
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.VolumeOff,
+                                                            contentDescription = "Mute",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text(
+                                                            text = "Mute",
+                                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                                color = Color.White,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        )
+                                                    }
+                                                } else if (isThisPaused) {
+                                                    // RESUME BUTTON: Restarts right from where stopped
+                                                    Button(
+                                                        onClick = {
+                                                            toggleSpeaker(message.id, message.text, selectedLanguage.ttsLocaleTag)
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = LegalDeepBlue,
+                                                            contentColor = LegalGoldPrimary
+                                                        ),
+                                                        shape = RoundedCornerShape(16.dp),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                                        modifier = Modifier
+                                                            .height(30.dp)
+                                                            .testTag("speaker_resume_button_${message.id}")
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.PlayArrow,
+                                                            contentDescription = "Resume",
+                                                            tint = LegalGoldPrimary,
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text(
+                                                            text = "Resume",
+                                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                                color = LegalGoldPrimary,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        )
+                                                    }
+                                                } else {
+                                                    // IDLE: Click to speak answer
+                                                    IconButton(
+                                                        onClick = {
+                                                            toggleSpeaker(message.id, message.text, selectedLanguage.ttsLocaleTag)
+                                                        },
+                                                        modifier = Modifier
+                                                            .size(32.dp)
+                                                            .testTag("speak_output_button_${message.id}")
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.VolumeUp,
+                                                            contentDescription = "Speak Answer",
+                                                            tint = LegalBlueHighlight,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -918,30 +1329,108 @@ fun VaniVoiceScreen(
                     }
                 }
 
-                // 3. Quick prompts
-                if (chatMessages.size <= 2) {
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                // 3. Offline Voice Assistant Quick Prompts Bar (Always Available Offline)
+                Surface(
+                    color = LegalBgLight,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        selectedLanguage.examplePrompts.forEach { prompt ->
+                        item {
                             Surface(
-                                shape = RoundedCornerShape(20.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = LegalGoldContainer,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, LegalGoldDark.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .clickable { showOfflineVoiceGuideDialog = true }
+                                    .testTag("voice_settings_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = "Voice Settings",
+                                        tint = LegalGoldDark,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Voice Settings",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = LegalGoldDark,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xFFECFDF5),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f)),
+                                modifier = Modifier
+                                    .clickable { onNavigateToOfflineStatus() }
+                                    .testTag("offline_diagnostics_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Diagnostics",
+                                        tint = Color(0xFF047857),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Offline Status & Test",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = Color(0xFF047857),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        items(selectedLanguage.sampleQuestions) { prompt ->
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
                                 color = LegalSurfaceWhite,
                                 border = androidx.compose.foundation.BorderStroke(1.dp, LegalBorder),
-                                modifier = Modifier.clickable { handleSend(prompt) }
+                                modifier = Modifier
+                                    .clickable { handleSend(prompt) }
+                                    .testTag("voice_quick_prompt")
                             ) {
-                                Text(
-                                    text = prompt,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = LegalDeepBlue,
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Mic,
+                                        contentDescription = null,
+                                        tint = LegalBlueHighlight,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = prompt,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = LegalDeepBlue,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
@@ -954,18 +1443,190 @@ fun VaniVoiceScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
+                        if (isSpeaking || isThinking) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Button(
+                                    onClick = {
+                                        stopAllOutput()
+                                        Toast.makeText(context, if (isThinking) "Generation stopped" else "Voice output stopped", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("global_voice_stop_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.StopCircle,
+                                        contentDescription = "Stop",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isThinking) "⏹️ Stop Generating" else "⏹️ Stop Voice Playback",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        if (isListening) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFFEF2F2),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFEF4444))
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "🎙️ ${selectedLanguage.nameNative} (AudioRecord) - Speak now...",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = LegalDeepBlue,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            voiceInputManager.stopListeningAndTranscribe()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = LegalDeepBlue),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Done", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isProcessing) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = LegalGoldContainer,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, LegalGoldDark.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = LegalGoldDark
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "🧠 On-Device STT transcribing speech offline...",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = LegalDeepBlue,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        // Quick Question Chips for 1-Tap Answers
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val quickQuestions = when (selectedLanguage.code.lowercase()) {
+                                "kannada" -> listOf(
+                                    "ಝೀರೋ ಎಫ್‌ಐಆರ್ ದಾಖಲಿಸುವ ವಿಧಾನ?",
+                                    "ಮನೆ ಖಾಲಿ ಮಾಡಿಸುವ ನಿಯಮಗಳು?",
+                                    "ಹೆಣ್ಣುಮಕ್ಕಳ ಆಸ್ತಿ ಹಕ್ಕು?",
+                                    "ಚೆಕ್ ಬೌನ್ಸ್ ಆದರೆ ಏನು ಮಾಡಬೇಕು?",
+                                    "ಜಾಮೀನು ಪಡೆಯುವ ಹಕ್ಕು?"
+                                )
+                                "marathi" -> listOf(
+                                    "झिरो एफआयआर कशी नोंदवावी?",
+                                    "घरमालक जबरदस्तीने काढू शकतो का?",
+                                    "वडिलोपार्जित मालमत्ता अधिकार?",
+                                    "चेक बाऊन्स कलम १३८ काय आहे?",
+                                    "जामीन मिळवण्याचे नियम?"
+                                )
+                                "hindi" -> listOf(
+                                    "जीरो एफआईआर कैसे दर्ज करें?",
+                                    "किरायेदार के कानूनी अधिकार?",
+                                    "पैतृक संपत्ति में बेटियों का हक?",
+                                    "चेक बाउंस होने पर क्या करें?",
+                                    "जमानत लेने की प्रक्रिया?"
+                                )
+                                else -> listOf(
+                                    "What is Zero FIR procedure?",
+                                    "Can landlord evict without notice?",
+                                    "Daughter rights in ancestral property?",
+                                    "Cheque bounce Sec 138 notice?",
+                                    "How to get anticipatory bail?"
+                                )
+                            }
+
+                            quickQuestions.forEach { qq ->
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = LegalGoldContainer.copy(alpha = 0.7f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, LegalGoldDark.copy(alpha = 0.3f)),
+                                    modifier = Modifier.clickable {
+                                        if (!isThinking) {
+                                            handleSend(qq)
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = qq,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = LegalDeepBlue,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             VoiceMicVisualizer(
                                 isListening = isListening,
+                                isProcessing = isProcessing,
                                 onClick = {
                                     if (isListening) {
-                                        speechRecognizer?.stopListening()
-                                        isListening = false
+                                        voiceInputManager.stopListeningAndTranscribe()
                                     } else {
-                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        requestAndStartListening()
                                     }
                                 }
                             )
@@ -983,6 +1644,13 @@ fun VaniVoiceScreen(
                                     )
                                 },
                                 shape = RoundedCornerShape(24.dp),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = {
+                                    if (inputText.isNotBlank() && !isThinking) {
+                                        handleSend(inputText)
+                                    }
+                                }),
+                                maxLines = 3,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = LegalGoldPrimary,
                                     unfocusedBorderColor = LegalBorder,
@@ -1017,5 +1685,87 @@ fun VaniVoiceScreen(
                 }
             }
         }
+    }
+
+    if (showOfflineVoiceGuideDialog) {
+        AlertDialog(
+            onDismissRequest = { showOfflineVoiceGuideDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = LegalGoldDark,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Offline Voice Setup: ${selectedLanguage.nameNative}",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "When offline, Google Speech Services requires downloading the language pack once on your phone to transcribe voice without Internet.",
+                        style = MaterialTheme.typography.bodyMedium.copy(color = LegalTextPrimary)
+                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = LegalGoldContainer.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "How to enable 100% Offline Voice for ${selectedLanguage.nameNative}:",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = LegalDeepBlue
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "1. Tap 'Download Voice Pack' below to open Google Speech Settings.\n2. Tap 'Offline speech recognition' -> 'ALL' tab.\n3. Find '${selectedLanguage.nameNative} (${selectedLanguage.nameEn})' and tap Download (~12 MB).\n4. Return here: Voice input will now work completely offline without Internet!",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = LegalTextPrimary,
+                                    lineHeight = 18.sp
+                                )
+                            )
+                        }
+                    }
+                    Text(
+                        text = "💡 Tip: You can also tap the text box below and use the keyboard microphone 🎤 or pick from the suggested legal questions.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = LegalTextSecondary,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOfflineVoiceGuideDialog = false
+                        openVoiceSettings()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LegalDeepBlue),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Download Voice Pack", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOfflineVoiceGuideDialog = false }) {
+                    Text("OK, Got It", color = LegalDeepBlue)
+                }
+            }
+        )
     }
 }

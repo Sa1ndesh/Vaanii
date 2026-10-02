@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -58,6 +61,7 @@ import com.vanikanoon.app.ui.screens.knowledge.KnowledgeBaseScreen
 import com.vanikanoon.app.ui.screens.learning.LearningHubScreen
 import com.vanikanoon.app.ui.screens.notices.NoticeGeneratorScreen
 import com.vanikanoon.app.ui.screens.settings.SettingsScreen
+import com.vanikanoon.app.ui.screens.status.OfflineStatusScreen
 import com.vanikanoon.app.ui.screens.student.StudentPortalScreen
 import com.vanikanoon.app.ui.screens.summarizer.CaseSummarizerScreen
 import com.vanikanoon.app.ui.screens.support.AboutScreen
@@ -100,6 +104,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     object Terms : Screen("terms", "Terms & Conditions")
     object PrivacyPolicy : Screen("privacy_policy", "Privacy Policy")
     object About : Screen("about", "About Vani-Kanoon")
+    object OfflineStatus : Screen("offline_status", "Offline System Diagnostics")
 }
 
 val bottomNavItems = listOf(
@@ -277,7 +282,8 @@ fun VaniKanoonApp() {
                     VaniVoiceScreen(
                         repository = repository,
                         userManager = userManager,
-                        onBack = { navController.popBackStack() }
+                        onBack = { navController.popBackStack() },
+                        onNavigateToOfflineStatus = { navController.navigate(Screen.OfflineStatus.route) }
                     )
                 }
 
@@ -346,7 +352,8 @@ fun VaniKanoonApp() {
                         onNavigateToReportIssue = { navController.navigate(Screen.ReportIssue.route) },
                         onNavigateToTerms = { navController.navigate(Screen.Terms.route) },
                         onNavigateToPrivacyPolicy = { navController.navigate(Screen.PrivacyPolicy.route) },
-                        onNavigateToAbout = { navController.navigate(Screen.About.route) }
+                        onNavigateToAbout = { navController.navigate(Screen.About.route) },
+                        onNavigateToOfflineStatus = { navController.navigate(Screen.OfflineStatus.route) }
                     )
                 }
 
@@ -401,6 +408,10 @@ fun VaniKanoonApp() {
 
                 composable(Screen.About.route) {
                     AboutScreen()
+                }
+
+                composable(Screen.OfflineStatus.route) {
+                    OfflineStatusScreen(onBack = { navController.popBackStack() })
                 }
             }
         }

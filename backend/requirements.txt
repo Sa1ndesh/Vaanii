@@ -23,3 +23,7 @@ pillow
 google-generativeai
 gtts
 pyttsx3
+faster-whisper
+SpeechRecognition
+soundfile
+numpy

@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Balance
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -146,49 +147,103 @@ fun VaniTopAppBar(
 fun VoiceMicVisualizer(
     isListening: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isProcessing: Boolean = false
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = if (isListening) 1.25f else 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
+    val infiniteTransition =
+        rememberInfiniteTransition(
+            label = "voice_mic_pulse"
+        )
+
+    val pulseScale by
+        infiniteTransition.animateFloat(
+            initialValue = 1.0f,
+            targetValue =
+                if (isListening) {
+                    1.25f
+                } else {
+                    1.0f
+                },
+            animationSpec =
+                infiniteRepeatable(
+                    animation =
+                        tween(
+                            durationMillis = 800,
+                            easing = FastOutSlowInEasing
+                        ),
+                    repeatMode = RepeatMode.Reverse
+                ),
+            label = "voice_mic_scale"
+        )
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier.size(80.dp)
     ) {
+        // =========================================
+        // LISTENING PULSE
+        // =========================================
         if (isListening) {
             Box(
-                modifier = Modifier
-                    .size(76.dp)
-                    .scale(pulseScale)
-                    .clip(CircleShape)
-                    .background(Color(0xFFEF4444).copy(alpha = 0.25f))
+                modifier =
+                    Modifier
+                        .size(76.dp)
+                        .scale(pulseScale)
+                        .clip(CircleShape)
+                        .background(
+                            Color(0xFFEF4444)
+                                .copy(alpha = 0.25f)
+                        )
             )
         }
 
+        // =========================================
+        // MICROPHONE BUTTON
+        // =========================================
         Surface(
             shape = CircleShape,
-            color = if (isListening) Color(0xFFEF4444) else LegalGoldPrimary,
+            color =
+                when {
+                    isProcessing -> LegalDeepBlue
+                    isListening -> Color(0xFFEF4444)
+                    else -> LegalGoldPrimary
+                },
             shadowElevation = 8.dp,
-            modifier = Modifier
-                .size(60.dp)
-                .clickable(onClick = onClick)
-                .testTag("voice_mic_button")
+            modifier =
+                Modifier
+                    .size(60.dp)
+                    .clickable(enabled = !isProcessing) {
+                        onClick()
+                    }
+                    .testTag("voice_mic_button")
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
-                    contentDescription = if (isListening) "Stop Listening" else "Start Voice Query",
-                    tint = if (isListening) LegalSurfaceWhite else LegalDeepBlue,
-                    modifier = Modifier.size(28.dp)
-                )
+            Box(
+                contentAlignment = Alignment.Center
+            ) {
+                if (isProcessing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(26.dp),
+                        strokeWidth = 2.5.dp,
+                        color = Color.White
+                    )
+                } else {
+                    Icon(
+                        imageVector =
+                            if (isListening) {
+                                Icons.Default.MicOff
+                            } else {
+                                Icons.Default.Mic
+                            },
+                        contentDescription =
+                            if (isListening) {
+                                "Stop Listening"
+                            } else {
+                                "Start Voice Input"
+                            },
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     }

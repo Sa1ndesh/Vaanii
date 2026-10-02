@@ -38,4 +38,38 @@ object SpeechSanitizer {
 
         return text
     }
+
+    /**
+     * Splits text into natural sentence / clause chunks for granular playback control.
+     * Allows pause/mute and resume from the exact sentence where playback was interrupted.
+     */
+    fun splitIntoSpeechChunks(rawText: String): List<String> {
+        val clean = sanitizeForSpeech(rawText)
+        if (clean.isBlank()) return emptyList()
+
+        // Split by sentence delimiters: period, exclamation, question mark, danda (।), double danda (॥), newlines
+        val rawSentences = clean.split(Regex("""(?<=[.!?।॥\n])\s+"""))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        if (rawSentences.isEmpty()) return listOf(clean)
+
+        val chunks = mutableListOf<String>()
+        for (sentence in rawSentences) {
+            if (sentence.length <= 160) {
+                chunks.add(sentence)
+            } else {
+                // If sentence is very long, split by comma or semicolon
+                val subParts = sentence.split(Regex("""(?<=[,;])\s+"""))
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                if (subParts.size > 1) {
+                    chunks.addAll(subParts)
+                } else {
+                    chunks.add(sentence)
+                }
+            }
+        }
+        return if (chunks.isEmpty()) listOf(clean) else chunks
+    }
 }
