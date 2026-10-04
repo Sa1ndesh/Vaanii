@@ -97,6 +97,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -196,8 +197,15 @@ fun VaniVoiceScreen(
     val cleanLang = selectedLanguage.code.uppercase()
     val cleanState = selectedState.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
     val cleanDistrict = selectedDistrict.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
-    val channelId = "VANI_VOICE_${cleanLang}_${cleanState}_${cleanDistrict}"
-    val chatMessages by repository.getChatMessages(channelId, userId).collectAsState(initial = emptyList())
+    val channelId = "${userId}_VANI_VOICE_${cleanLang}_${cleanState}_${cleanDistrict}"
+    
+    val chatMessages = remember { mutableStateListOf<ChatMessage>() }
+
+    LaunchedEffect(channelId) {
+        val loaded = repository.getChatMessages(channelId, userId).firstOrNull() ?: emptyList()
+        chatMessages.clear()
+        chatMessages.addAll(loaded)
+    }
 
     // Android TTS Engine
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
@@ -226,6 +234,7 @@ fun VaniVoiceScreen(
                 text = textToSend,
                 userId = userId
             )
+            chatMessages.add(userMsg)
             repository.saveChatMessage(userMsg, channelId, userId)
             android.util.Log.i("CHAT DEBUG", "Messages count: ${chatMessages.size}")
             isThinking = true
@@ -237,12 +246,14 @@ fun VaniVoiceScreen(
                 query = textToSend
             )
             android.util.Log.i("CHAT DEBUG", "Assistant message added:\n${botResponse.text}")
-            repository.saveChatMessage(botResponse.copy(userId = userId), channelId, userId)
+            val botMsgFinal = botResponse.copy(userId = userId)
+            chatMessages.add(botMsgFinal)
+            repository.saveChatMessage(botMsgFinal, channelId, userId)
             isThinking = false
             android.util.Log.i("CHAT DEBUG", "Final messages count: ${chatMessages.size}")
 
             // Scroll down
-            listState.animateScrollToItem((chatMessages.size + 1).coerceAtLeast(0))
+            listState.animateScrollToItem((chatMessages.size - 1).coerceAtLeast(0))
         }
         activeGenerationJob = job
     }
@@ -948,7 +959,10 @@ fun VaniVoiceScreen(
                         ) {
                             // Back to District/Steps Button
                             IconButton(
-                                onClick = { currentStep = VaniStep.DISTRICT_SELECTION },
+                                onClick = {
+                                    voiceInputManager.cancel()
+                                    currentStep = VaniStep.DISTRICT_SELECTION
+                                },
                                 modifier = Modifier
                                     .size(32.dp)
                                     .testTag("voice_chat_back_btn")
@@ -965,7 +979,10 @@ fun VaniVoiceScreen(
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = LegalGoldPrimary,
-                                modifier = Modifier.clickable { currentStep = VaniStep.LANGUAGE_SELECTION }
+                                modifier = Modifier.clickable {
+                                    voiceInputManager.cancel()
+                                    currentStep = VaniStep.LANGUAGE_SELECTION
+                                }
                             ) {
                                 Text(
                                     text = selectedLanguage.nameNative,
@@ -983,7 +1000,10 @@ fun VaniVoiceScreen(
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = LegalBlueLight,
-                                modifier = Modifier.clickable { currentStep = VaniStep.STATE_SELECTION }
+                                modifier = Modifier.clickable {
+                                    voiceInputManager.cancel()
+                                    currentStep = VaniStep.STATE_SELECTION
+                                }
                             ) {
                                 Text(
                                     text = selectedState,
@@ -1001,7 +1021,10 @@ fun VaniVoiceScreen(
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = LegalBlueLight,
-                                modifier = Modifier.clickable { currentStep = VaniStep.DISTRICT_SELECTION }
+                                modifier = Modifier.clickable {
+                                    voiceInputManager.cancel()
+                                    currentStep = VaniStep.DISTRICT_SELECTION
+                                }
                             ) {
                                 Text(
                                     text = selectedDistrict,
@@ -1021,6 +1044,7 @@ fun VaniVoiceScreen(
                                 color = LegalGoldPrimary.copy(alpha = 0.15f),
                                 border = BorderStroke(1.dp, LegalGoldPrimary.copy(alpha = 0.3f)),
                                 modifier = Modifier.clickable {
+                                    voiceInputManager.cancel()
                                     selectedState = ""
                                     selectedDistrict = ""
                                     currentStep = VaniStep.LANGUAGE_SELECTION

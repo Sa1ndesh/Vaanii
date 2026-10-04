@@ -90,6 +90,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -118,6 +119,7 @@ import com.vanikanoon.app.ui.theme.LegalTextMuted
 import com.vanikanoon.app.ui.theme.LegalTextPrimary
 import com.vanikanoon.app.ui.theme.LegalTextSecondary
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.firstOrNull
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -151,8 +153,15 @@ fun ChatbotScreen(
     var showStateDialog by remember { mutableStateOf(false) }
 
     val cleanChatState = selectedState.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
-    val channelId = "CHATBOT_${selectedLanguageCode.uppercase()}_${cleanChatState}"
-    val chatMessages by repository.getChatMessages(channelId, userId).collectAsState(initial = emptyList())
+    val channelId = "${userId}_CHATBOT_${selectedLanguageCode.uppercase()}_${cleanChatState}"
+    
+    val chatMessages = remember { mutableStateListOf<ChatMessage>() }
+
+    LaunchedEffect(channelId) {
+        val loaded = repository.getChatMessages(channelId, userId).firstOrNull() ?: emptyList()
+        chatMessages.clear()
+        chatMessages.addAll(loaded)
+    }
 
     // Speech Recognizer setup
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
@@ -181,22 +190,25 @@ fun ChatbotScreen(
         val job = scope.launch {
             android.util.Log.i("CHAT DEBUG", "User message added:\n$messageText")
             val userMsg = ChatMessage(role = MessageRole.USER, text = messageText, userId = userId)
+            chatMessages.add(userMsg)
             repository.saveChatMessage(userMsg, channelId, userId)
             android.util.Log.i("CHAT DEBUG", "Messages count: ${chatMessages.size}")
             isThinking = true
 
             val botMsg = repository.askChatbot(
                 query = messageText,
-                history = chatMessages,
+                history = chatMessages.toList(),
                 language = selectedLanguageCode,
                 stateName = selectedState
             )
             android.util.Log.i("CHAT DEBUG", "Assistant message added:\n${botMsg.text}")
-            repository.saveChatMessage(botMsg.copy(userId = userId), channelId, userId)
+            val botMsgFinal = botMsg.copy(userId = userId)
+            chatMessages.add(botMsgFinal)
+            repository.saveChatMessage(botMsgFinal, channelId, userId)
             isThinking = false
             android.util.Log.i("CHAT DEBUG", "Final messages count: ${chatMessages.size}")
 
-            listState.animateScrollToItem((chatMessages.size + 1).coerceAtLeast(0))
+            listState.animateScrollToItem((chatMessages.size - 1).coerceAtLeast(0))
         }
         activeGenerationJob = job
     }
