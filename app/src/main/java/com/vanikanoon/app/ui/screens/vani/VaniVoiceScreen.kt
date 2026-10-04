@@ -164,6 +164,8 @@ fun VaniVoiceScreen(
     var selectedState by rememberSaveable { mutableStateOf("") }
     var selectedDistrict by rememberSaveable { mutableStateOf("") }
     var inputText by rememberSaveable { mutableStateOf("") }
+    var showStatePicker by remember { mutableStateOf(false) }
+    var showDistrictPicker by remember { mutableStateOf(false) }
 
     val selectedLanguage = remember(selectedLanguageCode) {
         LanguageCatalog.languages.find { it.code.equals(selectedLanguageCode, ignoreCase = true) }
@@ -427,44 +429,17 @@ fun VaniVoiceScreen(
     }
 
     // ===============================
-    // MICROPHONE PERMISSION & ON-DEVICE VOICE
+    // MICROPHONE PERMISSION & ON-DEVICE VOICE (SHERPA-ONNX OFFLINE STT)
     // ===============================
 
-    val speechRecognizerLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val data = result.data
-                val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                val spokenText = results?.getOrNull(0) ?: ""
-                android.util.Log.i("VOICE DEBUG", "Native SpeechRecognizer result: '$spokenText'")
-                if (spokenText.isNotBlank()) {
-                    inputText = spokenText
-                    handleSend(spokenText)
-                } else {
-                    Toast.makeText(context, "No speech detected. Please try again.", Toast.LENGTH_SHORT).show()
-                }
+    fun startVoiceInput() {
+        android.util.Log.i("VOICE DEBUG", "Starting on-device Sherpa-ONNX voice capture for ${selectedLanguage.code}")
+        voiceInputManager.startListening(
+            languageNameOrCode = selectedLanguage.code,
+            onTranscriptionReady = { recognized ->
+                inputText = recognized
             }
-        }
-
-    fun launchSpeechRecognizer() {
-        try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage.speechLocaleTag)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your legal question in ${selectedLanguage.nameNative}...")
-            }
-            speechRecognizerLauncher.launch(intent)
-        } catch (e: Exception) {
-            android.util.Log.w("VOICE DEBUG", "RecognizerIntent failed, falling back to VoiceInputManager: ${e.message}")
-            voiceInputManager.startListening(
-                languageNameOrCode = selectedLanguage.code,
-                onTranscriptionReady = { recognized ->
-                    inputText = recognized
-                }
-            )
-        }
+        )
     }
 
     val permissionLauncher =
@@ -472,7 +447,7 @@ fun VaniVoiceScreen(
             contract = ActivityResultContracts.RequestPermission()
         ) { isGranted ->
             if (isGranted) {
-                launchSpeechRecognizer()
+                startVoiceInput()
             } else {
                 Toast.makeText(
                     context,
@@ -490,7 +465,7 @@ fun VaniVoiceScreen(
             )
 
         if (permission == PackageManager.PERMISSION_GRANTED) {
-            launchSpeechRecognizer()
+            startVoiceInput()
         } else {
             permissionLauncher.launch(
                 Manifest.permission.RECORD_AUDIO
@@ -867,7 +842,7 @@ fun VaniVoiceScreen(
 
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(filteredDistricts) { dist ->
-                            val info = DialectRegistry.getDialectInfo(selectedLanguage.code, dist)
+                            val info = DialectRegistry.getDialectInfo(selectedLanguage.code, dist, selectedState)
                             Card(
                                 onClick = {
                                     selectedDistrict = dist
@@ -877,7 +852,7 @@ fun VaniVoiceScreen(
                                         val destCleanLang = selectedLanguage.code.uppercase()
                                         val destCleanState = selectedState.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
                                         val destCleanDist = dist.ifBlank { "ALL" }.replace(Regex("[^A-Za-z0-9]"), "_").uppercase()
-                                        val targetChannelId = "VANI_VOICE_${destCleanLang}_${destCleanState}_${destCleanDist}"
+                                        val targetChannelId = "${userId}_VANI_VOICE_${destCleanLang}_${destCleanState}_${destCleanDist}"
 
                                         val existing = repository.getChatMessages(targetChannelId, userId).firstOrNull() ?: emptyList()
                                         if (existing.isEmpty()) {
@@ -938,7 +913,7 @@ fun VaniVoiceScreen(
             }
 
             VaniStep.VOICE_CHAT -> {
-                val dialectInfo = DialectRegistry.getDialectInfo(selectedLanguage.code, selectedDistrict)
+                val dialectInfo = DialectRegistry.getDialectInfo(selectedLanguage.code, selectedDistrict, selectedState)
 
                 // 1. Context header badge with interactive breadcrumbs
                 Surface(
@@ -1002,7 +977,7 @@ fun VaniVoiceScreen(
                                 color = LegalBlueLight,
                                 modifier = Modifier.clickable {
                                     voiceInputManager.cancel()
-                                    currentStep = VaniStep.STATE_SELECTION
+                                    showStatePicker = true
                                 }
                             ) {
                                 Text(
@@ -1023,7 +998,7 @@ fun VaniVoiceScreen(
                                 color = LegalBlueLight,
                                 modifier = Modifier.clickable {
                                     voiceInputManager.cancel()
-                                    currentStep = VaniStep.DISTRICT_SELECTION
+                                    showDistrictPicker = true
                                 }
                             ) {
                                 Text(
@@ -1788,6 +1763,192 @@ fun VaniVoiceScreen(
             dismissButton = {
                 TextButton(onClick = { showOfflineVoiceGuideDialog = false }) {
                     Text("OK, Got It", color = LegalDeepBlue)
+                }
+            }
+        )
+    }
+
+    if (showStatePicker) {
+        var stateSearchQuery by remember { mutableStateOf("") }
+        val allStates = DialectRegistry.getStatesForLanguage(selectedLanguage.code)
+        val filteredList = allStates.filter { it.contains(stateSearchQuery, ignoreCase = true) }
+
+        AlertDialog(
+            onDismissRequest = { showStatePicker = false },
+            title = {
+                Text(
+                    text = "Select State Jurisdiction",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = LegalDeepBlue)
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = stateSearchQuery,
+                        onValueChange = { stateSearchQuery = it },
+                        placeholder = { Text("Search any Indian state...", style = MaterialTheme.typography.bodySmall) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = LegalTextMuted) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = LegalSurfaceWhite,
+                            unfocusedContainerColor = LegalSurfaceWhite
+                        )
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(320.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filteredList) { st ->
+                            val isCurrent = selectedState.equals(st, ignoreCase = true)
+                            val distCount = DialectRegistry.getDistricts(selectedLanguage.code, st).size
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isCurrent) LegalGoldContainer else LegalSurfaceWhite,
+                                border = BorderStroke(1.dp, if (isCurrent) LegalGoldDark else LegalBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedState = st
+                                        val districts = DialectRegistry.getDistricts(selectedLanguage.code, st)
+                                        selectedDistrict = districts.firstOrNull { !it.startsWith("All Districts") } ?: districts.firstOrNull() ?: "Central"
+                                        showStatePicker = false
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = if (isCurrent) LegalGoldDark else LegalTextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = st,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                                color = LegalTextPrimary
+                                            )
+                                        )
+                                        Text(
+                                            text = "$distCount Districts / Jurisdiction Centers",
+                                            style = MaterialTheme.typography.labelSmall.copy(color = LegalTextSecondary)
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = LegalGoldDark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showStatePicker = false }) {
+                    Text("Close", color = LegalDeepBlue)
+                }
+            }
+        )
+    }
+
+    if (showDistrictPicker) {
+        var districtSearchQuery by remember { mutableStateOf("") }
+        val districts = DialectRegistry.getDistricts(selectedLanguage.code, selectedState)
+        val filteredDistricts = districts.filter { it.contains(districtSearchQuery, ignoreCase = true) }
+
+        AlertDialog(
+            onDismissRequest = { showDistrictPicker = false },
+            title = {
+                Text(
+                    text = "Select District in $selectedState",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = LegalDeepBlue)
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = districtSearchQuery,
+                        onValueChange = { districtSearchQuery = it },
+                        placeholder = { Text("Search district in $selectedState...", style = MaterialTheme.typography.bodySmall) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = LegalTextMuted) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = LegalSurfaceWhite,
+                            unfocusedContainerColor = LegalSurfaceWhite
+                        )
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filteredDistricts) { dist ->
+                            val isCurrent = selectedDistrict.equals(dist, ignoreCase = true)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isCurrent) LegalGoldContainer else LegalSurfaceWhite,
+                                border = BorderStroke(1.dp, if (isCurrent) LegalGoldDark else LegalBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedDistrict = dist
+                                        showDistrictPicker = false
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = if (isCurrent) LegalGoldDark else LegalTextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = dist,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                            color = LegalTextPrimary
+                                        )
+                                    )
+                                    if (isCurrent) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = LegalGoldDark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDistrictPicker = false }) {
+                    Text("Close", color = LegalDeepBlue)
                 }
             }
         )

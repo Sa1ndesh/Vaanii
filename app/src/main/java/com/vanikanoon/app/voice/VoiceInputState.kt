@@ -10,6 +10,12 @@ sealed class VoiceInputState {
     data class Error(val message: String, val canRetry: Boolean = true) : VoiceInputState()
 }
 
+enum class VoiceMode {
+    OFFLINE,
+    ONLINE,
+    AUTO
+}
+
 enum class MicState {
     IDLE,
     LISTENING,
@@ -17,3 +23,4 @@ enum class MicState {
     SUCCESS,
     ERROR
 }
+

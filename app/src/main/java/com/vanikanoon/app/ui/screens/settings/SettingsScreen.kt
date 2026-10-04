@@ -128,17 +128,6 @@ fun SettingsScreen(
         }
     }
 
-    val speechTestLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            if (!matches.isNullOrEmpty()) {
-                testSpeechResult = matches[0]
-                Toast.makeText(context, "Local STT Heard: \"${matches[0]}\"", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -608,17 +597,7 @@ fun SettingsScreen(
                     }
 
                     Button(
-                        onClick = {
-                            val intent = OfflineSpeechHelper.buildSpeechIntent(
-                                localeTag = "hi-IN",
-                                prompt = "Speak any legal question (No download required)..."
-                            )
-                            try {
-                                speechTestLauncher.launch(intent)
-                            } catch (_: Exception) {
-                                Toast.makeText(context, "Voice input ready. Tap mic in chat to speak.", Toast.LENGTH_SHORT).show()
-                            }
-                        },
+                        onClick = onNavigateToOfflineStatus,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = LegalGoldContainer,
                             contentColor = LegalDeepBlue

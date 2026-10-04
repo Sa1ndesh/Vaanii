@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import com.vanikanoon.app.util.OfflineSpeechHelper
 import com.vanikanoon.app.voice.VoiceInputManager
 import com.vanikanoon.app.voice.VoiceInputState
+import com.vanikanoon.app.voice.VoiceMode
 import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -391,6 +392,8 @@ fun ChatbotScreen(
         else -> "en-IN"
     }
 
+    var voiceMode by rememberSaveable { mutableStateOf(VoiceMode.OFFLINE) }
+
     val speechActivityLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -407,7 +410,7 @@ fun ChatbotScreen(
         }
     }
 
-    fun launchSpeechRecognizer() {
+    fun launchOnlineSpeechRecognizer() {
         try {
             val localeTag = when (selectedLanguageCode.lowercase()) {
                 "kannada" -> "kn-IN"
@@ -422,12 +425,27 @@ fun ChatbotScreen(
             }
             speechActivityLauncher.launch(intent)
         } catch (e: Exception) {
-            voiceInputManager.startListening(
-                languageNameOrCode = selectedLanguageCode,
-                onTranscriptionReady = { recognized ->
-                    inputText = recognized
+            startLocalVoiceInput()
+        }
+    }
+
+    fun startLocalVoiceInput() {
+        android.util.Log.i("VOICE DEBUG", "Starting on-device Sherpa-ONNX voice capture for $selectedLanguageCode")
+        voiceInputManager.startListening(
+            languageNameOrCode = selectedLanguageCode,
+            onTranscriptionReady = { recognized ->
+                inputText = recognized
+                if (recognized.isNotBlank()) {
+                    handleSend(recognized)
                 }
-            )
+            }
+        )
+    }
+
+    fun startVoiceInput() {
+        when (voiceMode) {
+            VoiceMode.ONLINE -> launchOnlineSpeechRecognizer()
+            VoiceMode.OFFLINE, VoiceMode.AUTO -> startLocalVoiceInput()
         }
     }
 
@@ -440,7 +458,7 @@ fun ChatbotScreen(
             contract = ActivityResultContracts.RequestPermission()
         ) { isGranted ->
             if (isGranted) {
-                launchSpeechRecognizer()
+                startVoiceInput()
             } else {
                 Toast.makeText(
                     context,
@@ -458,7 +476,7 @@ fun ChatbotScreen(
             )
 
         if (permission == PackageManager.PERMISSION_GRANTED) {
-            launchSpeechRecognizer()
+            startVoiceInput()
         } else {
             permissionLauncher.launch(
                 Manifest.permission.RECORD_AUDIO

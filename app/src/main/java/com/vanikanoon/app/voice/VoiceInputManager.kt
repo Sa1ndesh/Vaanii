@@ -28,6 +28,8 @@ class VoiceInputManager(
     val sttEngine = LocalSttEngine(context, modelManager)
     val audioRecorder = AudioRecorder(context)
 
+    var currentVoiceMode: VoiceMode = VoiceMode.OFFLINE
+
     private val _state = MutableStateFlow<VoiceInputState>(VoiceInputState.Idle)
     val state: StateFlow<VoiceInputState> = _state.asStateFlow()
 
